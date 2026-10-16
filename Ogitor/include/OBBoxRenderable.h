@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "OgitorsPrerequisites.h"
 #include <OgreSimpleRenderable.h>
 #include <OgreAxisAlignedBox.h>
 
@@ -11,7 +12,7 @@ namespace Ogitors
     /*!  
     An object-oriented box class implementation that is not present in OGRE
     */
-    class OBBoxRenderable : public Ogre::SimpleRenderable
+    class OgitorExport OBBoxRenderable : public Ogre::SimpleRenderable
     {
     private:
         Ogre::VertexData vertexes;  /** Box' vertices */

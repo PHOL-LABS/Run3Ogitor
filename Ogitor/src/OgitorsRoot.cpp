@@ -301,40 +301,40 @@ namespace Ogitors
                 {
                     // queue selection pass just after this group
                     pQueue->getQueueGroup(groupID + 1)->addRenderable(rend,
-                        solidSelectionMaterial->getSupportedTechnique(0), priority);
+                        solidSelectionMaterial->getBestTechnique(), priority);
                 }
                 return true;
             case SHADED:
                 // change to flat shading
-                *ppTech = solidColourMaterials[colourIndex]->getSupportedTechnique(0);
+                *ppTech = solidColourMaterials[colourIndex]->getBestTechnique();
                 // queue an extra renderable if selected
                 if (ctx && ctx->selected)
                 {
                     // queue selection pass just after this group
                     pQueue->getQueueGroup(groupID + 1)->addRenderable(rend,
-                        solidSelectionMaterial->getSupportedTechnique(0), priority);
+                        solidSelectionMaterial->getBestTechnique(), priority);
                 }
                 return true;
             case WIREFRAME:
                 // return a solid-coloured technique depending on selection
                 if (ctx && ctx->selected)
                 {
-                    *ppTech = wireSelectionMaterial->getSupportedTechnique(0);
+                    *ppTech = wireSelectionMaterial->getBestTechnique();
                 }
                 else
                 {
-                    *ppTech = wireColourMaterials[colourIndex]->getSupportedTechnique(0);
+                    *ppTech = wireColourMaterials[colourIndex]->getBestTechnique();
                 }
                 return true;
             case HIDDEN_LINE:
                 // Change to hidden line removal
-                *ppTech = hiddenLineColourMaterials[colourIndex]->getSupportedTechnique(0);
+                *ppTech = hiddenLineColourMaterials[colourIndex]->getBestTechnique();
                 // queue an extra renderable if selected
                 if (ctx && ctx->selected)
                 {
                     // queue selection pass just after this group
                     pQueue->getQueueGroup(groupID + 1)->addRenderable(rend,
-                        solidSelectionMaterial->getSupportedTechnique(0), priority);
+                        solidSelectionMaterial->getBestTechnique(), priority);
                 }
                 return true;
             };
@@ -679,10 +679,16 @@ namespace Ogitors
 
             try
             {
+                if(i->second->UsesNativeFiles()) mNativeSerializer = i->second;
                 if( i->second->Import() == SCF_OK )
+                {
+                    if(!i->second->NativeFileName().empty()) mNativeSerializer = i->second;
                     return true;
-                else
+                }
+                else {
+                    SetSceneModified(false); TerminateScene();
                     SetLoadState(LS_UNLOADED);
+                }
             }
             catch(...)
             {
@@ -1761,6 +1767,27 @@ namespace Ogitors
     //-----------------------------------------------------------------------------------------
     int OgitorsRoot::LoadScene(Ogre::String filename)
     {
+        if(filename.empty())
+        {
+            UTFStringVector filters;
+            filters.push_back(OTR("Ogitor or Run3 map"));
+            filters.push_back("*.ofs;*.ogscene;*.cfg");
+            filename = mSystem->DisplayOpenDialog(OTR("Open"), filters,
+                mSystem->GetSetting("system", "oldOpenPath", ""));
+            if(filename.empty()) return SCF_CANCEL;
+            mSystem->SetSetting("system", "oldOpenPath", filename);
+        }
+        for(auto& serializer : mSerializerList)
+        {
+            if(!serializer.second->CanOpenNative(filename)) continue;
+            SetLoadState(LS_LOADING);
+            mPostSceneUpdateList.clear();
+            mNativeSerializer = serializer.second;
+            int result = serializer.second->Import(filename);
+            if(result == SCF_OK) mNativeSerializer = serializer.second;
+            else { SetSceneModified(false); TerminateScene(); serializer.second->CloseNative(); }
+            return result;
+        }
         SetLoadState(LS_LOADING);
 
         ClearProjectOptions();
@@ -1804,6 +1831,7 @@ namespace Ogitors
     //-----------------------------------------------------------------------------------------
     std::string OgitorsRoot::GetSceneName()
     {
+        if(mNativeSerializer && mLoadState == LS_LOADED) return mNativeSerializer->NativeFileName();
         if(mLoadState == LS_LOADED)
         {
             return (*mProjectFile)->getFileSystemName();
@@ -1818,7 +1846,7 @@ namespace Ogitors
     {
         OgitorsPropertyValueMap params;
 
-        Ogre::UTFString entry = OgitorsUtils::QualifyPath((*mProjectFile)->getFileSystemName());
+        Ogre::UTFString entry = mNativeSerializer ? mNativeSerializer->NativeFileName() : OgitorsUtils::QualifyPath((*mProjectFile)->getFileSystemName());
         AddToRecentFiles(entry);
 
         mProjectOptions.CameraSaveCount--;
@@ -1916,7 +1944,9 @@ namespace Ogitors
             Ogre::MaterialPtr matptrOBBoxManualMaterial = result.first.staticCast<Ogre::Material>();
 #endif
 			matptrOBBoxManualMaterial->setReceiveShadows(false);
-            matptrOBBoxManualMaterial->getTechnique(0)->setLightingEnabled(true);
+            // OBBoxRenderable contains positions only. These UI lines must not
+            // request RTSS lighting (and therefore a NORMAL vertex stream).
+            matptrOBBoxManualMaterial->getTechnique(0)->setLightingEnabled(false);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setDiffuse(mProjectOptions.SelectionBBColour);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setAmbient(mProjectOptions.SelectionBBColour);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setSelfIllumination(mProjectOptions.SelectionBBColour);
@@ -1931,7 +1961,7 @@ namespace Ogitors
             Ogre::MaterialPtr matptrOBBoxManualMaterial = result.first.staticCast<Ogre::Material>();
 #endif
             matptrOBBoxManualMaterial->setReceiveShadows(false);
-            matptrOBBoxManualMaterial->getTechnique(0)->setLightingEnabled(true);
+            matptrOBBoxManualMaterial->getTechnique(0)->setLightingEnabled(false);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setDiffuse(mProjectOptions.HighlightBBColour);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setAmbient(mProjectOptions.HighlightBBColour);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setSelfIllumination(mProjectOptions.HighlightBBColour);
@@ -1946,7 +1976,7 @@ namespace Ogitors
             Ogre::MaterialPtr matptrOBBoxManualMaterial = result.first.staticCast<Ogre::Material>();
 #endif
             matptrOBBoxManualMaterial->setReceiveShadows(false);
-            matptrOBBoxManualMaterial->getTechnique(0)->setLightingEnabled(true);
+            matptrOBBoxManualMaterial->getTechnique(0)->setLightingEnabled(false);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setDiffuse(mProjectOptions.SelectHighlightBBColour);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setAmbient(mProjectOptions.SelectHighlightBBColour);
             matptrOBBoxManualMaterial->getTechnique(0)->getPass(0)->setSelfIllumination(mProjectOptions.SelectHighlightBBColour);
@@ -1984,6 +2014,12 @@ namespace Ogitors
     //-----------------------------------------------------------------------------------------
     bool OgitorsRoot::SaveScene(bool SaveAs, Ogre::String exportfile)
     {
+        if(mNativeSerializer)
+        {
+            if(mNativeSerializer->Export(SaveAs, exportfile) != SCF_OK) return false;
+            SetSceneModified(false);
+            return true;
+        }
         bool scriptRunningBeforeSave = false;
         if(GetRunState() == RS_RUNNING)
         {
@@ -2033,7 +2069,7 @@ namespace Ogitors
             DIALOGRET ret = mSystem->DisplayMessageDialog(OTR("Do you want to save your current project?"),DLGTYPE_YESNOCANCEL);
             switch(ret)
             {
-            case DLGRET_YES:SaveScene(false);break;
+            case DLGRET_YES:if(!SaveScene(false)) return false;break;
             case DLGRET_CANCEL:return false;
             case DLGRET_NO:break;
             }
@@ -2085,6 +2121,8 @@ namespace Ogitors
         }
 
         (*mProjectFile).unmount();
+
+        if(mNativeSerializer) { mNativeSerializer->CloseNative(); mNativeSerializer = nullptr; }
 
         return true;
     }

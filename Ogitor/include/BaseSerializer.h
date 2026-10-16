@@ -121,6 +121,11 @@ namespace Ogitors
         * @return true if serializer object requires scene to be terminated before importing new scene, otherwise false
         */
         virtual bool RequiresTerminateScene() {return false;}
+        // Native formats own the normal Open/Save lifecycle as well as Import.
+        virtual bool CanOpenNative(const Ogre::String& file) const { return false; }
+        virtual bool UsesNativeFiles() const { return false; }
+        virtual Ogre::String NativeFileName() const { return ""; }
+        virtual void CloseNative() {}
         /**
         * Exports scene data
         * @param SaveAs flag signifying that a "Save As" dialog is invoked to save scene file into different place

@@ -308,6 +308,10 @@ MainWindow::MainWindow(QString args, QWidget *parent)
 //------------------------------------------------------------------------------
 MainWindow::~MainWindow()
 {
+    // Destruction can also follow a programmatic QApplication exit, without a
+    // closeEvent. Ogre logs plugin unloads after this window has been deleted.
+    if(Ogre::LogManager::getSingletonPtr() && Ogre::LogManager::getSingleton().getDefaultLog())
+        Ogre::LogManager::getSingleton().getDefaultLog()->removeListener(this);
     EventManager::getSingletonPtr()->disconnectEvent(EventManager::MODIFIED_STATE_CHANGE,       this);
     EventManager::getSingletonPtr()->disconnectEvent(EventManager::UNDOMANAGER_NOTIFICATION,    this);
     EventManager::getSingletonPtr()->disconnectEvent(EventManager::RUN_STATE_CHANGE,            this);

@@ -39,6 +39,7 @@
 #include "ViewportEditor.h"
 #include "tinyxml.h"
 #include "ofs.h"
+#include <OgreShaderGenerator.h>
 
 using namespace Ogitors;
 
@@ -496,6 +497,7 @@ bool CSceneManagerEditor::load(bool async)
         return false;
 
     mHandle = Ogre::Root::getSingletonPtr()->createSceneManager(mSceneManagerType->get(),mName->get());
+    if(auto shaders = Ogre::RTShader::ShaderGenerator::getSingletonPtr()) shaders->addSceneManager(mHandle);
     if(mSkyBoxActive->get())
     {
         if(Ogre::MaterialManager::getSingletonPtr()->getByName(mSkyBoxMaterial->get()).isNull())
@@ -542,6 +544,7 @@ bool CSceneManagerEditor::unLoad()
         mHandle->destroyQuery(mSphereSceneQuery);
         mSphereSceneQuery = 0;
         
+        if(auto shaders = Ogre::RTShader::ShaderGenerator::getSingletonPtr()) shaders->removeSceneManager(mHandle);
         Ogre::Root::getSingletonPtr()->destroySceneManager(mHandle);
         mHandle = 0;
     }

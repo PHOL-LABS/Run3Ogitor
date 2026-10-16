@@ -44,6 +44,7 @@
 #include "EntityEditor.h"
 #include "ViewportEditor.h"
 #include "SceneManagerEditor.h"
+#include <OgreShaderGenerator.h>
 
 extern bool ViewKeyboard[1024];
 
@@ -104,6 +105,21 @@ void EntityViewWidget::resizeEvent(QResizeEvent* evt)
 //----------------------------------------------------------------------------------------
 void EntityViewWidget::prepareView()
 {
+    // Native games expose thousands of assets. Do not synchronously render the
+    // entire library (including unused/unsupported legacy meshes) on map open.
+    // These read-only entries are a resource catalogue, not ogscene drag sources.
+    const auto& locations = Ogre::ResourceGroupManager::getSingleton().getResourceLocationList(PROJECT_RESOURCE_GROUP);
+    for(const auto& location : locations) if(location.archive->getType() == "Run3Content")
+    {
+        listWidget->clear();
+        auto names = Ogre::ResourceGroupManager::getSingleton().findResourceNames(PROJECT_RESOURCE_GROUP, "*.mesh");
+        for(const auto& name : *names) {
+            auto item = new QListWidgetItem(QString::fromStdString(name), listWidget);
+            item->setToolTip(tr("Run3 mesh. Assign its filename in the native object's Custom Properties."));
+            item->setFlags(item->flags() & ~Qt::ItemIsDragEnabled);
+        }
+        return;
+    }
     _createImages(mIcons);
 
     listWidget->clear();
@@ -142,6 +158,8 @@ void EntityViewWidget::_createImages(ImageMap& retlist)
 
     Ogre::RenderTexture *rttTex = texture->getBuffer()->getRenderTarget();
     Ogre::SceneManager *mSceneMgr = Ogre::Root::getSingletonPtr()->createSceneManager("OctreeSceneManager", "EntityTexMgr");
+    auto shaders=Ogre::RTShader::ShaderGenerator::getSingletonPtr();
+    if(shaders) shaders->addSceneManager(mSceneMgr);
 
     Ogre::Light *dirl = mSceneMgr->createLight("DisplayLight");
     Ogre::SceneNode *light_node = mSceneMgr->getRootSceneNode()->createChildSceneNode();
@@ -161,6 +179,7 @@ void EntityViewWidget::_createImages(ImageMap& retlist)
     cam_node->lookAt(Ogre::Vector3(0, 0, 0), Ogre::Node::TS_PARENT);
 
     Ogre::Viewport *v = rttTex->addViewport(RTTCam);
+    if(shaders) v->setMaterialScheme(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
     v->setClearEveryFrame(true);
     v->setBackgroundColour(Ogre::ColourValue(0, 0, 0, 0));
 
@@ -192,7 +211,7 @@ void EntityViewWidget::_createImages(ImageMap& retlist)
         }
         catch(...)
         {
-            OgitorsSystem::getSingletonPtr()->DisplayMessageDialog(Ogre::UTFString(tr("Error while preparing mesh: ").toStdString()) + addstr, DLGTYPE_OK);
+            Ogre::LogManager::getSingleton().logError("Thumbnail skipped: " + addstr);
             ite++;
             continue;
         }
@@ -225,7 +244,7 @@ void EntityViewWidget::_createImages(ImageMap& retlist)
         }
         catch(...)
         {
-            OgitorsSystem::getSingletonPtr()->DisplayMessageDialog(Ogre::UTFString(tr("Error while preparing mesh: ").toStdString()) + mEntity->getName(), DLGTYPE_OK);
+            Ogre::LogManager::getSingleton().logError("Thumbnail render skipped: " + addstr);
         }
 
         mEntity->detachFromParent();
@@ -235,6 +254,7 @@ void EntityViewWidget::_createImages(ImageMap& retlist)
     }
 
     rttTex->removeAllViewports();
+    if(shaders) shaders->removeSceneManager(mSceneMgr);
     Ogre::Root::getSingletonPtr()->destroySceneManager(mSceneMgr);
     Ogre::TextureManager::getSingletonPtr()->unload(texture->getName());
     Ogre::TextureManager::getSingletonPtr()->remove(texture->getName());

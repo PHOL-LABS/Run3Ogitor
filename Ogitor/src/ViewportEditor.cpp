@@ -37,6 +37,7 @@
 #include "NodeEditor.h"
 #include "CameraEditor.h"
 #include "ViewportEditor.h"
+#include <OgreShaderGenerator.h>
 #include "MultiSelEditor.h"
 #include "SceneManagerEditor.h"
 #include "OgitorsUndoManager.h"
@@ -129,6 +130,8 @@ void CViewportEditor::_createViewport()
     mViewCamera->load();
 
     mHandle = mOgitorsRoot->GetRenderWindow()->addViewport(mViewCamera->getCamera(),mViewportIndex->get(),mPlacement->get().x,mPlacement->get().y,mPlacement->get().z,mPlacement->get().w);
+    if(Ogre::RTShader::ShaderGenerator::getSingletonPtr())
+        mHandle->setMaterialScheme(Ogre::RTShader::ShaderGenerator::DEFAULT_SCHEME_NAME);
 
     if(mName->get() == "")
     {    

@@ -264,7 +264,7 @@ int main(int argc, char *argv[])
     QFileInfo info(app.arguments().last());
     if(info.exists() && info.isFile())
     {
-        if(info.suffix() == "ofs")
+        if(info.suffix() == "ofs" || info.suffix() == "ogscene" || info.fileName().compare("scene.cfg", Qt::CaseInsensitive) == 0)
         {
             // Yes we've got an .OFS file to load.
             fileArg = info.absoluteFilePath();
@@ -274,7 +274,7 @@ int main(int argc, char *argv[])
         {
             // We are trying to load something we can't load
             // Exit the application.
-            QMessageBox msg(QMessageBox::Critical, "Ogitor Error", "We can only load Ogitor Scenes.\nExiting...");
+            QMessageBox msg(QMessageBox::Critical, "Ogitor Error", "Open an Ogitor scene or a Run3 scene.cfg.\nExiting...");
             msg.exec();
             return 0;
         }
@@ -375,7 +375,16 @@ int main(int argc, char *argv[])
         delete splash;
     }
 
-    int retval = app.exec();
+    // A native smoke check can finish during startup's event processing, before
+    // the main event loop exists. In that case exit() alone would be lost.
+    int retval = app.property("run3SmokeExit").isValid() ? app.property("run3SmokeExit").toInt() : app.exec();
+
+    // Programmatic smoke exit bypasses MainWindow::closeEvent. Tear down scene
+    // observers while their Qt views still exist, as the normal close path does.
+    if(app.property("run3SmokeExit").isValid()) {
+        mOgitorsRoot->SetSceneModified(false);
+        mOgitorsRoot->TerminateScene();
+    }
 
     writeRecentFiles();
 

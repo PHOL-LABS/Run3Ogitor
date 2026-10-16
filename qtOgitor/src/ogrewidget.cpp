@@ -181,16 +181,35 @@ void OgreWidget::paintEvent(QPaintEvent* evt)
     {
         if(this->width() > 0 && this->height() > 0)
         {
+            // A failed frame must not leave a clear camera/viewport behind or
+            // retry the same exception on every Qt paint event.
+            struct ClearFrame {
+                Ogre::SceneManager* scene;
+                Ogre::RenderWindow* window;
+                Ogre::Camera* camera = nullptr;
+                Ogre::SceneNode* node = nullptr;
+                bool viewport = false;
+                ~ClearFrame() {
+                    if(viewport) window->removeViewport(0);
+                    if(camera) scene->destroyCamera(camera);
+                    if(node) scene->destroySceneNode(node);
+                }
+            } clear{OgitorsRoot::getSingletonPtr()->GetSceneManager(), mRenderWindow};
+            try {
             if(OgitorsRoot::getSingletonPtr()->IsClearScreenNeeded())
             {
                 Ogre::Camera *clearcam = OgitorsRoot::getSingletonPtr()->GetSceneManager()->createCamera("sbtClearCam");
+                clear.camera = clearcam;
 		Ogre::SceneNode *cam_node = OgitorsRoot::getSingletonPtr()
 			->GetSceneManager()->getRootSceneNode()->createChildSceneNode();
+                clear.node = cam_node;
 		cam_node->attachObject(clearcam);
                 clearcam->setNearClipDistance(0.0001f);
                 clearcam->setFarClipDistance(0.0002f);
                 cam_node->lookAt(Ogre::Vector3(0,-1,0), Ogre::Node::TS_PARENT);
-                OgitorsRoot::getSingletonPtr()->GetRenderWindow()->addViewport(clearcam,0);
+                auto clearViewport = OgitorsRoot::getSingletonPtr()->GetRenderWindow()->addViewport(clearcam,0);
+                clearViewport->setVisibilityMask(0); // Background clear only; never render scene geometry.
+                clear.viewport = true;
             }
 
             if(adjustFrameTime)
@@ -204,9 +223,12 @@ void OgreWidget::paintEvent(QPaintEvent* evt)
 
             if(OgitorsRoot::getSingletonPtr()->IsClearScreenNeeded())
             {
-                OgitorsRoot::getSingletonPtr()->GetRenderWindow()->removeViewport(0);
-                OgitorsRoot::getSingletonPtr()->GetSceneManager()->destroyCamera("sbtClearCam");
                 OgitorsRoot::getSingletonPtr()->ClearScreenBackground(false);
+            }
+            } catch(const std::exception& error) {
+                mRenderStop = true;
+                Ogre::LogManager::getSingleton().logError("Rendering paused after frame failure: " + Ogre::String(error.what()));
+                mOverlayWidget->setMessageString(tr("Rendering paused after an error. See the Ogre log; close and reopen the map after correcting its resources."));
             }
         }
     }
@@ -536,7 +558,10 @@ void OgreWidget::onSceneLoadStateChange(Ogitors::IEvent* evt)
 
         if(state == LS_LOADED)
         {
-            appTitle += QString(" - ") + QString(OgitorsRoot::getSingletonPtr()->GetProjectOptions()->ProjectName.c_str()) + QString::fromStdString(Globals::OGSCENE_FORMAT_EXTENSION);
+            mRenderStop = false;
+            const auto scenePath=QString::fromStdString(OgitorsRoot::getSingletonPtr()->GetSceneName());
+            if(scenePath.endsWith("scene.cfg",Qt::CaseInsensitive)) appTitle += " - Run3: "+scenePath;
+            else appTitle += QString(" - ") + QString(OgitorsRoot::getSingletonPtr()->GetProjectOptions()->ProjectName.c_str()) + QString::fromStdString(Globals::OGSCENE_FORMAT_EXTENSION);
 
             mOgitorMainWindow->setCameraPositions();
 

@@ -251,6 +251,7 @@ add_subdirectory(Dependencies/GenericImageEditor)
 
 # Plugins
 add_subdirectory(Plugins/DotSceneSerializer)
+add_subdirectory(Plugins/Run3Serializer)
 add_subdirectory(Plugins/OgModularZone)
 add_subdirectory(Plugins/OgMaterialEditor)
 add_subdirectory(Plugins/OgAngelScript)

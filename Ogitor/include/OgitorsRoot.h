@@ -1143,6 +1143,7 @@ namespace Ogitors
         NameObjectPairList  mUpdateScriptList;                          /** Update queue for scripts */
         ObjectVector        mPostSceneUpdateList;                       /** Update list that is called after scene is loaded */
         SerializerMap       mSerializerList;                            /** Hash map of all registered serializers */
+        CBaseSerializer*    mNativeSerializer = nullptr;
         PluginEntryMap      mPlugins;                                   /** List of all loaded plugins */
         ScriptInterpreterMap mScriptInterpreterList;                    /** List of all loaded script interpreters */
         EditorObjectFactoryMap mEditorObjectFactories;                  /** List of all Editor Object Factories */
