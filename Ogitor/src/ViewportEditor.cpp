@@ -93,7 +93,7 @@ int CViewportEditor::getRect(Ogre::Vector4 &rect)
 //-------------------------------------------------------------------------------
 void CViewportEditor::renderWindowResized()
 {
-    if (mHandle && mActiveCamera) 
+    if (mHandle && mActiveCamera && mHandle->getActualWidth() > 0 && mHandle->getActualHeight() > 0)
     {
         mActiveCamera->getCamera()->setAspectRatio((Ogre::Real)mHandle->getActualWidth() / (Ogre::Real)mHandle->getActualHeight()); 
         mActiveCamera->getCamera()->getParentNode()->yaw(Ogre::Radian(0));
@@ -138,7 +138,8 @@ void CViewportEditor::_createViewport()
         mName->init("Viewport" + Ogre::StringConverter::toString(mViewportIndex->get()));
     }
 
-    mViewCamera->getCamera()->setAspectRatio((Ogre::Real)mHandle->getActualWidth() / (Ogre::Real)mHandle->getActualHeight());
+    if(mHandle->getActualWidth() > 0 && mHandle->getActualHeight() > 0)
+        mViewCamera->getCamera()->setAspectRatio((Ogre::Real)mHandle->getActualWidth() / (Ogre::Real)mHandle->getActualHeight());
     mViewCamera->showHelper(false);
 
     mActiveCamera = mViewCamera;
@@ -238,7 +239,8 @@ void CViewportEditor::setCameraEditor(CCameraEditor *camed)
     mActiveCamera->showBoundingBox(false);
     mActiveCamera->showHelper(false);
 
-    mActiveCamera->getCamera()->setAspectRatio((Ogre::Real)mHandle->getActualWidth() / (Ogre::Real)mHandle->getActualHeight());
+    if(mHandle->getActualWidth() > 0 && mHandle->getActualHeight() > 0)
+        mActiveCamera->getCamera()->setAspectRatio((Ogre::Real)mHandle->getActualWidth() / (Ogre::Real)mHandle->getActualHeight());
     mHandle->setCamera(mActiveCamera->getCamera());
 }
 //-----------------------------------------------------------------------------------------
@@ -262,7 +264,8 @@ bool CViewportEditor::_setPlacement(OgitorsPropertyBase* property, const Ogre::V
     if(mHandle)
     {
         mHandle->setDimensions(value.x, value.y, value.z, value.w);
-        mHandle->getCamera()->setAspectRatio((Ogre::Real)mHandle->getActualWidth() / (Ogre::Real)mHandle->getActualHeight());
+        if(mHandle->getCamera() && mHandle->getActualWidth() > 0 && mHandle->getActualHeight() > 0)
+            mHandle->getCamera()->setAspectRatio((Ogre::Real)mHandle->getActualWidth() / (Ogre::Real)mHandle->getActualHeight());
         mOgitorsRoot->ClearScreenBackground(true);
     }
 

@@ -3,6 +3,7 @@
 #include "Run3Document.h"
 
 namespace Run3Editor {
+void verifyPreviewVertexLayouts();
 class EntityFactory;
 class Entity : public Ogitors::CNodeEditor, public Ogitors::OgitorsPropertySetListener {
     friend class EntityFactory;

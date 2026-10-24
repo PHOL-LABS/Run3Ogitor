@@ -68,29 +68,86 @@ static Ogre::MaterialPtr meshPreviewMaterial(Ogre::SubEntity* sub,const Ogre::Me
     auto material=previewMaterial(sub->getMaterial());
     auto data=sub->getSubMesh()->useSharedVertices ? mesh->sharedVertexData : sub->getSubMesh()->vertexData;
     if(!material || !data) return material;
+    const bool normals=data->vertexDeclaration->findElementBySemantic(Ogre::VES_NORMAL)!=nullptr;
     bool mismatch=false;
     for(unsigned short t=0;t<material->getNumTechniques();++t) {
         auto technique=material->getTechnique(t);
         if(technique->getSchemeName()!=Ogre::MaterialManager::DEFAULT_SCHEME_NAME) continue;
         for(unsigned short p=0;p<technique->getNumPasses();++p) {
             auto pass=technique->getPass(p);
+            if(!normals && (pass->getLightingEnabled() || pass->hasVertexProgram())) mismatch=true;
             for(unsigned short u=0;u<pass->getNumTextureUnitStates();++u)
                 if(!data->vertexDeclaration->findElementBySemantic(Ogre::VES_TEXTURE_COORDINATES,pass->getTextureUnitState(u)->getTextureCoordSet())) mismatch=true;
         }
     }
     if(!mismatch) return material;
     const bool uv0=data->vertexDeclaration->findElementBySemantic(Ogre::VES_TEXTURE_COORDINATES,0)!=nullptr;
-    const auto name=material->getName()+(uv0?"/EditorUV0":"/EditorNoUV");
+    const auto name=material->getName()+(uv0?"/EditorUV0":"/EditorNoUV")+(normals?"":"/Unlit");
     auto adapted=Ogre::MaterialManager::getSingleton().getByName(name,PROJECT_RESOURCE_GROUP);
     if(adapted) return adapted;
-    adapted=material->clone(name,true,PROJECT_RESOURCE_GROUP);
-    for(unsigned short t=0;t<adapted->getNumTechniques();++t) for(unsigned short p=0;p<adapted->getTechnique(t)->getNumPasses();++p) {
-        auto pass=adapted->getTechnique(t)->getPass(p);
+    // Copy only the source scheme. Cloning RTSS-generated techniques also
+    // copies shaders with the incompatible NORMAL/TEXCOORD input layout.
+    adapted=Ogre::MaterialManager::getSingleton().create(name,PROJECT_RESOURCE_GROUP);
+    auto target=adapted->getTechnique(0);
+    target->removeAllPasses();
+    Ogre::Technique* source=nullptr;
+    for(unsigned short t=0;t<material->getNumTechniques();++t)
+        if(material->getTechnique(t)->getSchemeName()==Ogre::MaterialManager::DEFAULT_SCHEME_NAME) { source=material->getTechnique(t); break; }
+    if(!source) { target->createPass()->setLightingEnabled(false); return adapted; }
+    for(unsigned short p=0;p<source->getNumPasses();++p) {
+        auto pass=target->createPass();
+        *pass=*source->getPass(p);
+        // Regenerate a shader for this vertex layout rather than retaining a
+        // custom game program whose inputs may not exist on this submesh.
+        pass->setVertexProgram("");
+        pass->setFragmentProgram("");
+        pass->setGeometryProgram("");
+        if(!normals) pass->setLightingEnabled(false);
         if(!uv0) pass->removeAllTextureUnitStates();
         else for(unsigned short u=0;u<pass->getNumTextureUnitStates();++u) pass->getTextureUnitState(u)->setTextureCoordSet(0);
     }
-    Ogre::LogManager::getSingleton().logMessage("Run3 editor UV adaptation: "+material->getName()+" on "+mesh->getName());
+    Ogre::LogManager::getSingleton().logMessage("Run3 editor vertex layout adaptation: "+material->getName()+" on "+mesh->getName());
     return adapted;
+}
+void verifyPreviewVertexLayouts() {
+    auto root=OgitorsRoot::getSingletonPtr();
+    auto scene=root->GetSceneManager();
+    auto camera=root->GetViewport()->getCameraEditor()->getCamera();
+    auto material=Ogre::MaterialManager::getSingleton().create("Run3/SmokeLit",PROJECT_RESOURCE_GROUP);
+    // Force both a NORMAL and a TEXCOORD1 dependency in the source material.
+    material->getTechnique(0)->getPass(0)->createTextureUnitState()->setTextureCoordSet(1);
+    for(bool normals : {false,true}) for(bool uv : {false,true}) {
+        auto manual=scene->createManualObject();
+        const auto name="Run3/SmokeLayout"+Ogre::String(normals?"N":"P")+(uv?"UV":"");
+        Ogre::Entity* entity=nullptr;
+        try {
+            manual->begin(material,Ogre::RenderOperation::OT_TRIANGLE_LIST);
+            for(const auto& point : {Ogre::Vector3(-10,-10,0),Ogre::Vector3(10,-10,0),Ogre::Vector3(0,10,0)}) {
+                manual->position(camera->getDerivedPosition()+camera->getDerivedDirection()*100+point);
+                if(normals) manual->normal(0,0,1);
+                if(uv) manual->textureCoord(0,0);
+            }
+            manual->triangle(0,1,2); manual->end();
+            auto mesh=manual->convertToMesh(name,PROJECT_RESOURCE_GROUP);
+            entity=scene->createEntity(mesh); entity->setCastShadows(false);
+            auto adapted=meshPreviewMaterial(entity->getSubEntity(0),mesh);
+            entity->getSubEntity(0)->setMaterial(adapted);
+            scene->getRootSceneNode()->attachObject(entity);
+            for(int repeat=0;repeat<2;++repeat) {
+                // A reused source may already have generated techniques.
+                entity->getSubEntity(0)->setMaterial(meshPreviewMaterial(entity->getSubEntity(0),mesh));
+                Ogre::Root::getSingleton().renderOneFrame();
+            }
+            scene->destroyEntity(entity); entity=nullptr;
+            scene->destroyManualObject(manual); manual=nullptr;
+            Ogre::MeshManager::getSingleton().remove(name,PROJECT_RESOURCE_GROUP);
+        } catch(...) {
+            if(entity) scene->destroyEntity(entity);
+            if(manual) scene->destroyManualObject(manual);
+            throw;
+        }
+    }
+    Ogre::LogManager::getSingleton().logMessage("Run3 native smoke: meshes with missing normals/UVs and reused generated techniques passed");
 }
 Entity::Entity(CBaseEditorFactory* f) : CNodeEditor(f) {
     PROPERTY_PTR(mXml, "run3::xml", Ogre::String, Ogre::String("<node name=\"new_run3_node\"><position x=\"0\" y=\"0\" z=\"0\"/></node>"), 0, 0);

@@ -4,6 +4,7 @@
 #include <OgreArchive.h>
 #include <OgreArchiveFactory.h>
 #include <OgreArchiveManager.h>
+#include <OgreRenderObjectListener.h>
 #include <QApplication>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -305,6 +306,43 @@ public:
                     } catch(...) { cameraEditor->setOrientation(orientation); throw; }
                     cameraEditor->setOrientation(orientation);
                     Ogre::LogManager::getSingleton().logMessage("Run3 native smoke: selection/hover boxes and 360-degree camera sweep passed");
+                    verifyPreviewVertexLayouts();
+                    // Exercise the Qt paint boundary, including a second failed
+                    // retry, rather than only calling Ogre directly.
+                    QWidget* renderWidget=nullptr;
+                    for(auto widget : QApplication::allWidgets())
+                        if(QByteArray(widget->metaObject()->className())=="OgreWidget") { renderWidget=widget; break; }
+                    if(!renderWidget) throw std::runtime_error("Render widget not found");
+                    struct FailingFrame : Ogre::RenderObjectListener {
+                        void notifyRenderSingleObject(Ogre::Renderable*, const Ogre::Pass*, const Ogre::AutoParamDataSource*, const Ogre::LightList*, bool) override {
+                            throw std::runtime_error("Injected render recovery failure");
+                        }
+                    } failingFrame;
+                    auto scene=root->GetSceneManager();
+                    const auto savedPosition=sample->getPosition();
+                    root->SetSceneModified(true);
+                    const auto viewportCount=root->GetRenderWindow()->getNumViewports();
+                    root->ClearScreenBackground(true);
+                    scene->addRenderObjectListener(&failingFrame);
+                    try {
+                        renderWidget->repaint();
+                        if(!renderWidget->property("renderFailed").toBool()) throw std::runtime_error("Frame failure was not contained");
+                        auto button=renderWidget->findChild<QPushButton*>();
+                        if(!button || !button->isVisible()) throw std::runtime_error("Render recovery control is hidden");
+                        const auto message=button->parentWidget();
+                        renderWidget->repaint();
+                        if(!message->isVisible()) throw std::runtime_error("Failure overlay disappeared");
+                        button->click();
+                        renderWidget->repaint();
+                        if(!renderWidget->property("renderFailed").toBool()) throw std::runtime_error("Repeated failure was not contained");
+                        scene->removeRenderObjectListener(&failingFrame);
+                        button->click();
+                        renderWidget->repaint();
+                        if(renderWidget->property("renderFailed").toBool() || message->isVisible()) throw std::runtime_error("Rendering did not recover");
+                        if(!root->IsSceneModified() || sample->getPosition()!=savedPosition) throw std::runtime_error("Recovery lost unsaved scene state");
+                        if(root->GetRenderWindow()->getNumViewports()!=viewportCount) throw std::runtime_error("Failed frame leaked a temporary viewport");
+                    } catch(...) { scene->removeRenderObjectListener(&failingFrame); throw; }
+                    Ogre::LogManager::getSingleton().logMessage("Run3 native smoke: frame failure, failed retry and successful render recovery passed");
                     Ogre::Root::getSingleton().renderOneFrame();
                     const auto screenshot=qEnvironmentVariable("RUN3_EDITOR_SMOKE");
                     if(screenshot.endsWith(".png")) root->GetRenderWindow()->writeContentsToFile(screenshot.toStdString());

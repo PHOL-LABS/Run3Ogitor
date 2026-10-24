@@ -57,6 +57,7 @@
 #include <QtCore/QDir>
 
 #include <QSettings>
+#include <QScopedValueRollback>
 
 using namespace Ogitors;
 
@@ -74,7 +75,7 @@ void OverlayWidget::paintEvent(QPaintEvent* evt)
 }
 //----------------------------------------------------------------------------------------
 OgreWidget::OgreWidget(QWidget *parent, bool doLoadFile, Qt::WindowFlags f): QWidget( parent,  f /*| Qt::MSWindowsOwnDC*/ ),
-mOgreRoot(0), mRenderWindow(0), mOgreInitialised(false), mLastKeyEventTime(0),
+mOgreRoot(0), mRenderWindow(0), mOgreInitialised(false),
 mRenderStop(false), mScreenResize(false), mCursorHidden(false), mDoLoadFile(doLoadFile)
 {
     mSwitchingScene = false;
@@ -94,6 +95,13 @@ mRenderStop(false), mScreenResize(false), mCursorHidden(false), mDoLoadFile(doLo
     QVBoxLayout *layout = new QVBoxLayout();
     layout->setMargin(0);
     layout->addWidget(mOverlayWidget);
+    mRestoreRenderButton = new QPushButton(tr("Restore rendering"), mOverlayWidget);
+    auto overlayLayout = new QVBoxLayout(mOverlayWidget);
+    overlayLayout->addStretch();
+    overlayLayout->addWidget(mRestoreRenderButton, 0, Qt::AlignHCenter);
+    overlayLayout->addSpacing(24);
+    mRestoreRenderButton->hide();
+    connect(mRestoreRenderButton, &QPushButton::clicked, this, &OgreWidget::restoreRendering);
     setLayout(layout);
     
     EventManager::getSingletonPtr()->connectEvent(EventManager::LOAD_STATE_CHANGE, this, true, 0, true, 0, EVENT_CALLBACK(OgreWidget, onSceneLoadStateChange));
@@ -103,6 +111,7 @@ OgreWidget::~OgreWidget()
 {
     if(mOgreInitialised)
     {
+        Ogre::MeshManager::getSingletonPtr()->setListener(nullptr);
         Ogre::Root::getSingletonPtr()->removeFrameListener(this);
         mOgreRoot->getRenderSystem()->removeListener(this);
     }
@@ -174,10 +183,11 @@ bool adjustFrameTime = false;
 
 void OgreWidget::paintEvent(QPaintEvent* evt)
 {
-    if(!isVisible())
+    if(!isVisible() || mPainting)
         return;
+    QScopedValueRollback<bool> painting(mPainting, true);
 
-    if(mOgreInitialised && OgitorsRoot::getSingletonPtr()->IsSceneLoaded() && !mRenderStop)
+    if(mOgreInitialised && OgitorsRoot::getSingletonPtr()->IsSceneLoaded() && !mRenderStop && !hasRenderFailure())
     {
         if(this->width() > 0 && this->height() > 0)
         {
@@ -194,8 +204,9 @@ void OgreWidget::paintEvent(QPaintEvent* evt)
                     if(camera) scene->destroyCamera(camera);
                     if(node) scene->destroySceneNode(node);
                 }
-            } clear{OgitorsRoot::getSingletonPtr()->GetSceneManager(), mRenderWindow};
+            };
             try {
+            ClearFrame clear{OgitorsRoot::getSingletonPtr()->GetSceneManager(), mRenderWindow};
             if(OgitorsRoot::getSingletonPtr()->IsClearScreenNeeded())
             {
                 Ogre::Camera *clearcam = OgitorsRoot::getSingletonPtr()->GetSceneManager()->createCamera("sbtClearCam");
@@ -208,17 +219,22 @@ void OgreWidget::paintEvent(QPaintEvent* evt)
                 clearcam->setFarClipDistance(0.0002f);
                 cam_node->lookAt(Ogre::Vector3(0,-1,0), Ogre::Node::TS_PARENT);
                 auto clearViewport = OgitorsRoot::getSingletonPtr()->GetRenderWindow()->addViewport(clearcam,0);
-                clearViewport->setVisibilityMask(0); // Background clear only; never render scene geometry.
                 clear.viewport = true;
+                clearViewport->setVisibilityMask(0); // Background clear only; never render scene geometry.
+                clearViewport->setOverlaysEnabled(false);
+                clearViewport->setSkiesEnabled(false);
+                clearViewport->setShadowsEnabled(false);
             }
 
             if(adjustFrameTime)
             {
-                mOgreRoot->renderOneFrame(0.01f);
+                if(!mOgreRoot->renderOneFrame(0.01f))
+                    throw std::runtime_error("A frame listener stopped rendering");
                 adjustFrameTime = false;
             }
             else
-                mOgreRoot->renderOneFrame();
+                if(!mOgreRoot->renderOneFrame())
+                    throw std::runtime_error("A frame listener stopped rendering");
 
 
             if(OgitorsRoot::getSingletonPtr()->IsClearScreenNeeded())
@@ -226,14 +242,15 @@ void OgreWidget::paintEvent(QPaintEvent* evt)
                 OgitorsRoot::getSingletonPtr()->ClearScreenBackground(false);
             }
             } catch(const std::exception& error) {
-                mRenderStop = true;
-                Ogre::LogManager::getSingleton().logError("Rendering paused after frame failure: " + Ogre::String(error.what()));
-                mOverlayWidget->setMessageString(tr("Rendering paused after an error. See the Ogre log; close and reopen the map after correcting its resources."));
+                pauseRenderingAfterError(QString::fromUtf8(error.what()));
+            } catch(...) {
+                pauseRenderingAfterError(tr("Unknown rendering error"));
             }
         }
     }
     else
     {
+        if(hasRenderFailure()) return; // Keep the diagnostic and recovery button visible.
         QString msgstr = tr("Initializing OGRE...");
 
         if(mOgreInitialised && !OgitorsRoot::getSingletonPtr()->IsSceneLoaded())
@@ -253,14 +270,52 @@ void OgreWidget::paintEvent(QPaintEvent* evt)
     }
 }
 //------------------------------------------------------------------------------------
+void OgreWidget::pauseRenderingAfterError(const QString& error)
+{
+    mRenderError = error;
+    if(mRenderError.isEmpty()) mRenderError = tr("Unknown rendering error");
+    Ogre::LogManager::getSingleton().logError("Rendering paused after frame failure: " + mRenderError.toStdString());
+    std::fill(std::begin(ViewKeyboard), std::end(ViewKeyboard), false);
+    mKeyTimer.invalidate();
+    showCursorEx(true);
+    releaseMouse();
+    releaseKeyboard();
+    mOverlayWidget->setMessageString(tr("Rendering paused. Your map and edits are still open.\n\n%1\n\nCorrect the resource if needed, then restore rendering.").arg(mRenderError));
+    mRestoreRenderButton->show();
+    mOverlayWidget->show();
+    mOverlayWidget->raise();
+    adjustFrameTime = true;
+}
+//------------------------------------------------------------------------------------
+void OgreWidget::restoreRendering()
+{
+    if(!mOgreInitialised || mRenderStop || mPainting || !OgitorsRoot::getSingletonPtr()->IsSceneLoaded()) return;
+    try {
+        // Discard bindings from the interrupted frame. Ogre will rebind the
+        // viewport and programs and handle a recoverable device loss on update.
+        mOgreRoot->getRenderSystem()->_setViewport(nullptr);
+        mOgreRoot->clearEventTimes();
+        OgitorsRoot::getSingletonPtr()->RenderWindowResized();
+        std::fill(std::begin(ViewKeyboard), std::end(ViewKeyboard), false);
+        mKeyTimer.invalidate();
+        mRenderError.clear();
+        adjustFrameTime = true;
+        mRestoreRenderButton->hide();
+        mOverlayWidget->hide();
+        update();
+    } catch(const std::exception& error) {
+        pauseRenderingAfterError(QString::fromUtf8(error.what()));
+    } catch(...) {
+        pauseRenderingAfterError(tr("Unknown error restoring rendering"));
+    }
+}
+//------------------------------------------------------------------------------------
 void OgreWidget::resizeEvent(QResizeEvent* evt)
 {
-    mScreenResize = true;
+    QScopedValueRollback<bool> resizing(mScreenResize, true);
 
-    if(OgitorsRoot::getSingletonPtr()->IsSceneLoaded())
+    if(width() > 0 && height() > 0 && OgitorsRoot::getSingletonPtr()->IsSceneLoaded())
         OgitorsRoot::getSingletonPtr()->RenderWindowResized();
-
-    mScreenResize = false;
 }
 //------------------------------------------------------------------------------------
 void OgreWidget::focusInEvent(QFocusEvent *evt)
@@ -428,13 +483,12 @@ QPaintEngine* OgreWidget::paintEngine() const
 //------------------------------------------------------------------------------------
 void OgreWidget::ProcessKeyActions()
 {
-    QTime time = QTime::currentTime();
-    unsigned int curtime = time.hour() * 60 + time.minute();
-    curtime = (curtime * 60) + time.second();
-    curtime = (curtime * 1000) + time.msec();
-
-    unsigned int iTimeDiff = curtime - mLastKeyEventTime;
-    mLastKeyEventTime = curtime;
+    if(mRenderStop || hasRenderFailure() || !hasFocus() || !isVisible()) {
+        mKeyTimer.invalidate();
+        return;
+    }
+    const unsigned int iTimeDiff = mKeyTimer.isValid() ? static_cast<unsigned int>(std::min<qint64>(mKeyTimer.restart(), 100)) : 0;
+    if(!mKeyTimer.isValid()) mKeyTimer.start();
 
     if(OgitorsRoot::getSingletonPtr()->GetViewport())
         OgitorsRoot::getSingletonPtr()->GetViewport()->ProcessKeyActions(iTimeDiff);
@@ -559,6 +613,10 @@ void OgreWidget::onSceneLoadStateChange(Ogitors::IEvent* evt)
         if(state == LS_LOADED)
         {
             mRenderStop = false;
+            mRenderError.clear();
+            mRestoreRenderButton->hide();
+            mKeyTimer.invalidate();
+            adjustFrameTime = true;
             const auto scenePath=QString::fromStdString(OgitorsRoot::getSingletonPtr()->GetSceneName());
             if(scenePath.endsWith("scene.cfg",Qt::CaseInsensitive)) appTitle += " - Run3: "+scenePath;
             else appTitle += QString(" - ") + QString(OgitorsRoot::getSingletonPtr()->GetProjectOptions()->ProjectName.c_str()) + QString::fromStdString(Globals::OGSCENE_FORMAT_EXTENSION);
@@ -634,6 +692,8 @@ void OgreWidget::onSceneLoadStateChange(Ogitors::IEvent* evt)
         }
         else if(state == LS_UNLOADED)
         {
+            mRenderError.clear();
+            mRestoreRenderButton->hide();
             // Don't hide on OSX since we always want the windows up
 #if OGRE_PLATFORM != OGRE_PLATFORM_APPLE
             if(!isSwitchingScene())

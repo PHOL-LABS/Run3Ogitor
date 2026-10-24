@@ -33,6 +33,8 @@
 #define __OGREWIDGET_HXX__
 
 #include <QtCore/QTimer>
+#include <QtCore/QElapsedTimer>
+#include <QtWidgets/QPushButton>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
 
@@ -85,6 +87,7 @@ protected:
 class OgreWidget : public QWidget, public Ogre::FrameListener, public Ogre::RenderSystem::Listener, public Ogre::MeshSerializerListener
 {
     Q_OBJECT;
+    Q_PROPERTY(bool renderFailed READ hasRenderFailure)
 
 public:
     bool  mOgreInitialised;
@@ -132,19 +135,25 @@ public:
     void processSkeletonName(Ogre::Mesh *mesh, Ogre::String *name){};
 	void processMeshCompleted(Ogre::Mesh *mesh){};
     void stopRendering(bool stop) {mRenderStop = stop;};
+    bool hasRenderFailure() const { return !mRenderError.isEmpty(); }
+    void pauseRenderingAfterError(const QString& error);
 
     OverlayWidget* getOverlayWidget() {return mOverlayWidget;};
 
 public Q_SLOTS:
     void timerLoop();
     void contextMenu(int id);
+    void restoreRendering();
 
 protected:
     Ogre::Root         *mOgreRoot;
     bool                mSwitchingScene;
 
-    unsigned int  mLastKeyEventTime;
-    volatile bool mScreenResize;
+    QElapsedTimer mKeyTimer;
+    bool mPainting = false;
+    QString mRenderError;
+    QPushButton* mRestoreRenderButton;
+    bool          mScreenResize;
     bool          mCursorHidden;
     bool          mDoLoadFile;
 

@@ -112,6 +112,7 @@ namespace Ogitors
     //-------------------------------------------------------------------------------
     void CViewportEditor::OnKeyDown (unsigned int key)
     {
+        if(!mViewKeyboard || key >= 1024) return;
         mViewKeyboard[key] = true;
 
         if(!mOgitorsRoot->GetSelection()->isEmpty())
@@ -148,6 +149,7 @@ namespace Ogitors
     //-------------------------------------------------------------------------------
     void CViewportEditor::OnKeyUp (unsigned int key)
     {
+        if(!mViewKeyboard || key >= 1024) return;
         mViewKeyboard[key] = false;
     }
     //-------------------------------------------------------------------------------
@@ -696,7 +698,7 @@ namespace Ogitors
     //-------------------------------------------------------------------------------
     bool CViewportEditor::GetMouseRay( Ogre::Vector2 point, Ogre::Ray &mRay )
     {
-        if(!mActiveCamera) 
+        if(!mActiveCamera || !mHandle || mHandle->getActualWidth() == 0 || mHandle->getActualHeight() == 0)
             return false;
 
         float width = mHandle->getActualWidth();

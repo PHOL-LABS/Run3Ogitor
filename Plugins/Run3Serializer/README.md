@@ -47,6 +47,17 @@ changed by saving. Game compositor effects, physics, NPC AI, sequence playback
 and audio playback do not run in the editor. Validate final lighting and gameplay
 in `run3_shell`.
 
+Preview shaders adapt to each submesh's vertex layout. Meshes without normals
+use unlit previews, and missing texture coordinates use UV0 or an untextured
+preview. Generated shader techniques are rebuilt for the adapted layout.
+
+If a frame fails, the viewport shows the error and a **Restore rendering**
+button. The map and unsaved edits stay open. Correct a persistent resource issue
+if needed, then click the button to retry. Another failed attempt returns to the
+same recovery screen. This handles rendering exceptions within the editor;
+an operating system or graphics driver crash that terminates the process still
+requires restarting Ogitor.
+
 Meshes rejected by the SDK's stricter legacy reader can be canonicalized by the
 official Ogre 14.5 `OgreMeshUpgrader` already used by the port. CMake discovers
 the tool in the port's Windows vcpkg build, or it can be provided through
@@ -75,6 +86,7 @@ runs a bounded graphical test, exercises a gizmo move and property edit, restore
 them, checks an unchanged editor/XML round trip and the no-op Save path, renders
 a frame, tests actual object selection, move/rotate/scale gizmos and highlighted
 handles, all three hover/selection box materials and a full camera rotation,
+meshes without normals/UVs, and recovery after repeated mid-frame failures,
 captures it under the engine's `build` directory and exits. It does not
 write map files. The script terminates only its own process on timeout.
 
