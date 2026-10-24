@@ -66,6 +66,7 @@
 #include <QtCore/QLibraryInfo>
 
 #include <QtWidgets/QWidgetAction>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QMenuBar>
 #include <QtWidgets/QDockWidget>
 #include <QtWidgets/QStatusBar>
@@ -721,6 +722,32 @@ void MainWindow::createSceneRenderWindow()
     sliderActionWidget->setText(tr("Camera Speed"));
     menuCameraPositionMain->addAction(sliderActionWidget);
 
+    mMouseNavigationSpeedSlider = new QSlider(Qt::Horizontal);
+    mMouseNavigationSpeedSlider->setRange(10, 600);
+    mMouseNavigationSpeedSlider->setSingleStep(10);
+    mMouseNavigationSpeedSlider->setPageStep(50);
+    mMouseNavigationSpeedSlider->setTickInterval(50);
+    mMouseNavigationSpeedSlider->setTickPosition(QSlider::TicksBelow);
+    mMouseNavigationSpeedSlider->setMaximumWidth(140);
+    QSettings navigationSettings;
+    const int mouseNavigationPercent = navigationSettings.value(
+        "preferences/mouseNavigationSpeed", 350).toInt();
+    mMouseNavigationSpeedSlider->setValue(mouseNavigationPercent);
+    mMouseNavigationSpeedSlider->setToolTip(
+        tr("Mouse look speed: %1%").arg(mouseNavigationPercent));
+    CViewportEditor::SetMouseNavigationSpeed(mouseNavigationPercent / 100.0f);
+
+    QWidget *mouseNavigationWidget = new QWidget(menuCameraPositionMain);
+    QHBoxLayout *mouseNavigationLayout = new QHBoxLayout(mouseNavigationWidget);
+    mouseNavigationLayout->setContentsMargins(8, 2, 8, 2);
+    mouseNavigationLayout->addWidget(
+        new QLabel(tr("Mouse Look:"), mouseNavigationWidget));
+    mouseNavigationLayout->addWidget(mMouseNavigationSpeedSlider);
+    QWidgetAction *mouseNavigationActionWidget = new QWidgetAction(this);
+    mouseNavigationActionWidget->setDefaultWidget(mouseNavigationWidget);
+    mouseNavigationActionWidget->setText(tr("Mouse Look Speed"));
+    menuCameraPositionMain->addAction(mouseNavigationActionWidget);
+
     menuCameraPositionMain->addSeparator();
     for(unsigned int i = 0;i < 10;i++)
     {
@@ -761,6 +788,7 @@ void MainWindow::createSceneRenderWindow()
     connect(mSnapMultiplierBox, SIGNAL( currentIndexChanged( int )), this, SLOT( snapMultiplierIndexChanged( int )));
     connect(mCameraViewModeBox, SIGNAL( currentIndexChanged( int )), this, SLOT( viewModeIndexChanged( int )));
     connect(mCameraSpeedSlider, SIGNAL( valueChanged( int )), this, SLOT( cameraSpeedValueChanged( int )));
+    connect(mMouseNavigationSpeedSlider, SIGNAL( valueChanged( int )), this, SLOT( mouseNavigationSpeedValueChanged( int )));
     connect(mSnapGround, SIGNAL( stateChanged( int )), this, SLOT( snapGroundChanged( int )));
 }
 //------------------------------------------------------------------------------
@@ -1327,6 +1355,8 @@ void MainWindow::setCameraPositions()
     }
 
     mCameraSpeedSlider->setValue(pOpt->CameraSpeed);
+    CViewportEditor::SetMouseNavigationSpeed(
+        mMouseNavigationSpeedSlider->value() / 100.0f);
 }
 //------------------------------------------------------------------------------
 void MainWindow::setSelectedObjectsCount(int count)

@@ -334,6 +334,7 @@ namespace Ogitors
         static int                 mEditorToolEx;           /** Additional editor tool information */
         static int                 mEditorAxis;             /** Current editor axis */
         static float               mCameraSpeed;            /** Active camera speed */
+        static float               mMouseNavigationSpeed;   /** Mouse-look/orbit sensitivity multiplier */
         static bool                mIsEditing;              /** Active editing flag */
         static bool                mIsSettingPos;           /** Change to movement tool flag */
         static OgitorsUndoManager *mUndoManager;            /** Undo manager handle */
@@ -388,6 +389,16 @@ namespace Ogitors
         * @return camera speed
         */
         float GetCameraSpeed() {return mCameraSpeed;};
+        /**
+        * Sets mouse-look and object-orbit sensitivity.
+        * @param value sensitivity multiplier (1.0 is the legacy behaviour)
+        */
+        static void SetMouseNavigationSpeed(float value)
+        {
+            mMouseNavigationSpeed = Ogre::Math::Clamp(value, 0.1f, 10.0f);
+        };
+        /** Fetches the mouse-look and object-orbit sensitivity multiplier. */
+        static float GetMouseNavigationSpeed() {return mMouseNavigationSpeed;};
         /**
         * Sets editor tool (splatting, painting, smoothing etc)
         * @param new editor tool

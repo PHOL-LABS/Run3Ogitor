@@ -58,6 +58,7 @@ namespace Ogitors
     int                 CViewportEditor::mEditorToolEx = TOOL_EX_NONE;
     int                 CViewportEditor::mEditorAxis = 0;
     float               CViewportEditor::mCameraSpeed = 1.0f;
+    float               CViewportEditor::mMouseNavigationSpeed = 3.5f;
     bool                CViewportEditor::mIsEditing = false;
     bool                CViewportEditor::mIsSettingPos = false;
     bool               *CViewportEditor::mViewKeyboard = 0;
@@ -72,6 +73,7 @@ namespace Ogitors
         mEditorToolEx = TOOL_EX_NONE;
         mEditorAxis = 0;
         mCameraSpeed = 1.0f;
+        mMouseNavigationSpeed = 3.5f;
         mIsEditing = false;
         mIsSettingPos = false;
     }
@@ -198,7 +200,10 @@ namespace Ogitors
                     Ogre::Vector3 lookat =  multisel->getAsSingle()->getDerivedPosition();
                     Ogre::Vector3 vDistance = (mActiveCamera->getDerivedPosition() - lookat);
                     float fDist = vDistance.length();
-                    vDistance = (mActiveCamera->getCamera()->getDerivedRight() * -DeltaX * fDist / 48.0f) + (mActiveCamera->getCamera()->getDerivedUp() * DeltaY * fDist / 96.0f) + vDistance;
+                    vDistance = (mActiveCamera->getCamera()->getDerivedRight() *
+                        -DeltaX * mMouseNavigationSpeed * fDist / 48.0f) +
+                        (mActiveCamera->getCamera()->getDerivedUp() * DeltaY *
+                        mMouseNavigationSpeed * fDist / 96.0f) + vDistance;
                     vDistance.normalise();
                     Ogre::Vector3 vNewPos = lookat + (vDistance * fDist);
                     mActiveCamera->setDerivedPosition(vNewPos);
@@ -207,8 +212,8 @@ namespace Ogitors
                 }
                 else
                 {
-                    mActiveCamera->yaw(Ogre::Degree(-DeltaX / 4.0f));
-                    mActiveCamera->pitch(Ogre::Degree(-DeltaY / 4.0f));
+                    mActiveCamera->yaw(Ogre::Degree(-DeltaX * mMouseNavigationSpeed / 4.0f));
+                    mActiveCamera->pitch(Ogre::Degree(-DeltaY * mMouseNavigationSpeed / 4.0f));
                 }
                 OgitorsSystem::getSingletonPtr()->ShowMouseCursor(false);
 

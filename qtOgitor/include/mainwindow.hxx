@@ -234,6 +234,7 @@ public:
     QSignalMapper *recentMapper;
 
     QSlider*  mCameraSpeedSlider;
+    QSlider*  mMouseNavigationSpeedSlider;
     QSlider*  mFPSSlider;
     QLabel*   mFPSSliderLabel;
 #if OGRE_MEMORY_TRACKER
@@ -351,6 +352,7 @@ public Q_SLOTS:
     void toggleWorldSpaceGizmo();
     void toggleWalkAround();
     void cameraSpeedValueChanged(int value);
+    void mouseNavigationSpeedValueChanged(int value);
     void fpsValueChanged(int value);
     void setCameraPolyMode(int value);
     void selectActionTriggered(int value);

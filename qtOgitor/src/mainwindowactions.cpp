@@ -1109,6 +1109,15 @@ void MainWindow::cameraSpeedValueChanged ( int value )
     mCameraSpeedSlider->setToolTip(QString("%1").arg(value));
 }
 //------------------------------------------------------------------------------
+void MainWindow::mouseNavigationSpeedValueChanged ( int value )
+{
+    CViewportEditor::SetMouseNavigationSpeed(value / 100.0f);
+    mMouseNavigationSpeedSlider->setToolTip(
+        tr("Mouse look speed: %1%").arg(value));
+    QSettings settings;
+    settings.setValue("preferences/mouseNavigationSpeed", value);
+}
+//------------------------------------------------------------------------------
 void MainWindow::saveCamera()
 {
     Ogitors::PROJECTOPTIONS *pOpt = OgitorsRoot::getSingletonPtr()->GetProjectOptions();
