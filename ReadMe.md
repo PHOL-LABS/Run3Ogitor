@@ -14,6 +14,14 @@ You can choose not to by setting `OGITOR_DOWNLOAD_SAMPLEMEDIA` and `OGITOR_DOWNL
 
 **Note:** you must do the install (as in `make install`) step for ogitor to find the plugins. In doubt uncheck the `OGITOR_DIST` cmake option.
 
+## Run3 level authoring through MCP
+
+The native Run3 plugin includes a local MCP bridge with Connect/Disconnect and
+port controls. Codex and other stdio MCP clients can create levels, place meshes
+and boxes, edit materials/textures and lighting, inspect native entities, and
+capture the live viewport for visual corrections. See the
+[Run3Ogitor MCP setup and tool guide](tools/run3ogitor_mcp/README.md).
+
 ## Running OGITOR
 
 To be able to run Ogitor, you will need the media.zip archive downloaded and extracted into the OGITOR ```"RunPath"``` folder. The projects.zip archive is optional but advised, since it offers a sample scene to get you started. Both archives can be downloaded under the following links:

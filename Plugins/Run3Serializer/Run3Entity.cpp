@@ -349,6 +349,8 @@ Ogre::AxisAlignedBox Entity::getAABB() {
 void Entity::preview(TiXmlElement& e) {
     auto manager = mOgitorsRoot->GetSceneManager();
     const Ogre::String tag = e.Value();
+    if(tag=="environment") if(auto c=e.FirstChildElement("colourAmbient"))
+        manager->setAmbientLight(Ogre::ColourValue(number(*c,"r",0.25f),number(*c,"g",0.25f),number(*c,"b",0.25f)));
     Ogre::String mesh = attr(e,"meshFile",attr(e,"mesh",attr(e,"meshName")));
     // Wrapper buttons often contain a mesh child; render it only once.
     if(e.FirstChildElement("entity") || e.FirstChildElement("nocollide")) mesh.clear();
@@ -380,6 +382,7 @@ void Entity::preview(TiXmlElement& e) {
             mLight = manager->createLight(getName()+"/light");
             const auto type = attr(e,"type","point");
             mLight->setType(type=="spot" ? Ogre::Light::LT_SPOTLIGHT : (type=="directional" ? Ogre::Light::LT_DIRECTIONAL : Ogre::Light::LT_POINT));
+            mLight->setPowerScale(number(e,"power",1));
             if(auto color=e.FirstChildElement("colourDiffuse")) mLight->setDiffuseColour(number(*color,"r",1),number(*color,"g",1),number(*color,"b",1));
             if(auto a=e.FirstChildElement("lightAttenuation")) mLight->setAttenuation(number(*a,"range",2000),number(*a,"constant",1),number(*a,"linear"),number(*a,"quadratic"));
             if(auto r=e.FirstChildElement("lightRange")) if(type=="spot") mLight->setSpotlightRange(Ogre::Degree(number(*r,"inner",30)),Ogre::Degree(number(*r,"outer",60)));

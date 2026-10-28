@@ -1,2 +1,6 @@
 /RunPath/Projects
+/artifacts/
+/build-support/mcp-build.log
+/build-support/mcp-install.log
+__pycache__/
 

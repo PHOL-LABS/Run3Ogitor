@@ -1,4 +1,5 @@
 #include "Run3Entity.h"
+#include "Run3Mcp.h"
 #include "OBBoxRenderable.h"
 #include "ofs.h"
 #include <OgreArchive.h>
@@ -26,6 +27,9 @@
 #include <QProcess>
 #include <QStandardPaths>
 #include <QCryptographicHash>
+#include <QJsonArray>
+#include <QRegularExpression>
+#include <QSaveFile>
 #include <cstring>
 #include <functional>
 
@@ -150,11 +154,78 @@ public:
     std::vector<unsigned int> editorScaffold;
     Ogre::String archiveName;
     QString fileName;
+    std::unique_ptr<Content> mcpLoadContent;
+    QString lastError;
+    QJsonObject mcpLifecycle(const QString& tool,const QJsonObject& args) {
+        auto root=OgitorsRoot::getSingletonPtr();
+        if(tool=="level_save") {
+            if(fileName.isEmpty() || !root->IsSceneLoaded()) throw std::runtime_error("No native level is open");
+            saveNative(); root->SetSceneModified(false);
+            return {{"saved",true},{"scene_cfg",fileName},{"destination",document.content.destination(document.configRelative)}};
+        }
+        if(root->IsSceneModified()) throw std::runtime_error("Unsaved edits: save or undo them before opening/creating another level");
+        Content paths; paths.base=args.value("content_root").toString();
+        if(!QDir(paths.base).isAbsolute() || !QDir(paths.base+"/run3").exists()) throw std::runtime_error("content_root must be an absolute game root containing run3");
+        for(auto overlay:args.value("overlays").toArray()) {
+            if(!overlay.isString() || !QDir(overlay.toString()).isAbsolute() || !QDir(overlay.toString()).exists()) throw std::runtime_error("Every overlay must be an existing absolute directory");
+            paths.overlays<<overlay.toString();
+        }
+        QString cfg=args.value("scene_cfg").toString();
+        if(tool=="level_create") {
+            const auto name=args.value("name").toString();
+            if(!QRegularExpression("^[A-Za-z][A-Za-z0-9_-]{0,63}$").match(name).hasMatch()) throw std::runtime_error("Level name must contain only letters, digits, underscore or hyphen and start with a letter");
+            const auto output=args.value("output_root").toString();
+            if(!QDir(output).isAbsolute() || !QDir(output).exists()) throw std::runtime_error("output_root must be an existing absolute directory for the new content overlay");
+            paths.overlays.removeAll(output); paths.overlays<<output;
+            const auto relative="run3/maps/high/"+name;
+            const auto directory=QDir(output).filePath(relative);
+            for(const auto& contentRoot:paths.roots()) if(QFileInfo::exists(QDir(contentRoot).filePath(relative))) throw std::runtime_error("Level directory already exists in base or overlay; choose a new name");
+            // Refuse existing symlink/junction ancestors leading outside the
+            // explicitly selected output root.
+            auto ancestor=QFileInfo(directory).absolutePath();
+            while(!QFileInfo::exists(ancestor)) ancestor=QFileInfo(ancestor).absolutePath();
+            const auto canonical=QFileInfo(output).canonicalFilePath();
+            const auto resolved=QFileInfo(ancestor).canonicalFilePath();
+            if(resolved!=canonical && !resolved.startsWith(canonical+'/',Qt::CaseInsensitive)) throw std::runtime_error("Level path escapes output_root through a symlink");
+            if(!QDir().mkpath(directory)) throw std::runtime_error("Cannot create level directory");
+            auto put=[&](const QString& name,const QByteArray& bytes) {
+                QSaveFile file(directory+'/'+name);
+                if(!file.open(QIODevice::WriteOnly) || file.write(bytes)!=bytes.size() || !file.commit()) throw std::runtime_error("Cannot write new level file");
+            };
+            put("scene.xml","<scene formatVersion=\"1.0\"><environment><colourAmbient r=\"0.25\" g=\"0.25\" b=\"0.25\"/><player x=\"0\" y=\"180\" z=\"400\" fov=\"60\"/></environment><nodes/></scene>\n");
+            put("sequence.xml","<sequence><adents/></sequence>\n");
+            put("scene.cfg","Scene=scene.xml\nSequence=sequence.xml\nText="+name.toUtf8()+"\nNewtonWX1=-100000\nNewtonWY1=-100000\nNewtonWZ1=-100000\nNewtonWX2=100000\nNewtonWY2=100000\nNewtonWZ2=100000\n");
+            cfg=directory+"/scene.cfg";
+        }
+        if(!QFileInfo(cfg).isAbsolute() || !QFileInfo::exists(cfg)) throw std::runtime_error("scene_cfg must be an existing absolute scene.cfg path");
+        // Preflight before closing the current map.
+        Document check; check.open(cfg,paths);
+        if(root->IsSceneLoaded() && !root->TerminateScene()) throw std::runtime_error("Cannot close current scene");
+        mcpLoadContent.reset(new Content(paths));
+        struct Reset { std::unique_ptr<Content>& value; ~Reset() { value.reset(); } } reset{mcpLoadContent};
+        if(root->LoadScene(cfg.toStdString())!=SCF_OK) throw std::runtime_error(("Cannot open level: "+lastError).toStdString());
+        return {{"scene_cfg",fileName},{"map_directory",document.mapDirectory},{"writable_root",paths.overlays.isEmpty()?paths.base:paths.overlays.last()}};
+    }
+    void saveNative() {
+        for(auto& pair:OgitorsRoot::getSingletonPtr()->GetSceneManagerEditor()->getChildren())
+            if(!dynamic_cast<Entity*>(pair.second) && std::find(editorScaffold.begin(),editorScaffold.end(),pair.second->getObjectID())==editorScaffold.end())
+                throw std::runtime_error("Non-native objects must be placed inside native map documents");
+        std::vector<QByteArray> outputs;
+        for(size_t i=0;i<roots.size();++i) {
+            auto editor=dynamic_cast<Entity*>(OgitorsRoot::getSingletonPtr()->FindObject(roots[i]));
+            if(!editor) throw std::runtime_error("A Run3 document root was deleted; undo before saving");
+            TiXmlDocument copy(*document.documents[i].xml); auto xml=editor->xml(); copy.ReplaceChild(copy.RootElement(),*xml); outputs.push_back(printXml(copy));
+        }
+        document.save(outputs); fileName=document.content.resolve(document.configRelative);
+    }
     bool RequiresTerminateScene() override { return true; }
     bool UsesNativeFiles() const override { return true; }
     bool CanOpenNative(const Ogre::String& file) const override { return QFileInfo(QString::fromStdString(file)).fileName().compare("scene.cfg",Qt::CaseInsensitive)==0; }
     Ogre::String NativeFileName() const override { return fileName.toStdString(); }
     void CloseNative() override {
+        // Particle templates are not Resource objects; destroying the resource
+        // group alone leaves them registered and breaks the next native load.
+        Ogre::ParticleSystemManager::getSingleton().removeTemplatesByResourceGroup(PROJECT_RESOURCE_GROUP);
         if(!archiveName.empty()) { Ogre::ArchiveManager::getSingleton().unload(archiveName); archiveName.clear(); }
         roots.clear(); editorScaffold.clear(); workspace.reset(); document=Document(); fileName.clear();
     }
@@ -169,7 +240,8 @@ public:
             if(cfg.isEmpty()) return SCF_CANCEL;
             Content paths;
             // Environment overrides support scripted editor smoke tests and launchers.
-            if(qEnvironmentVariableIsSet("RUN3_EDITOR_CONTENT_ROOT")) {
+            if(mcpLoadContent) paths=*mcpLoadContent;
+            else if(qEnvironmentVariableIsSet("RUN3_EDITOR_CONTENT_ROOT")) {
                 paths.base=qEnvironmentVariable("RUN3_EDITOR_CONTENT_ROOT");
                 paths.overlays=qEnvironmentVariable("RUN3_EDITOR_OVERLAYS").split(';',Qt::SkipEmptyParts);
             } else if(!chooseContent(cfg,paths)) return SCF_CANCEL;
@@ -355,12 +427,13 @@ public:
             });
             return SCF_OK;
         } catch(const std::exception& error) {
+            lastError=QString::fromUtf8(error.what());
             Ogre::LogManager::getSingleton().logError("Run3 import: "+Ogre::String(error.what()));
             if(qEnvironmentVariableIsSet("RUN3_EDITOR_SMOKE")) {
                 QApplication::instance()->setProperty("run3SmokeExit",2);
                 QTimer::singleShot(0,QApplication::instance(),[]{ QApplication::exit(2); });
             }
-            else QMessageBox::critical(QApplication::activeWindow(),"Run3 map could not be opened",QString::fromUtf8(error.what()));
+            else if(!mcpLoadContent) QMessageBox::critical(QApplication::activeWindow(),"Run3 map could not be opened",QString::fromUtf8(error.what()));
             root->SetSceneModified(false); root->TerminateScene(); CloseNative(); return SCF_ERRFILE;
         }
     }
@@ -371,19 +444,7 @@ public:
             return SCF_CANCEL;
         }
         try {
-            for(auto& pair:OgitorsRoot::getSingletonPtr()->GetSceneManagerEditor()->getChildren())
-                if(!dynamic_cast<Entity*>(pair.second) && std::find(editorScaffold.begin(),editorScaffold.end(),pair.second->getObjectID())==editorScaffold.end())
-                    throw std::runtime_error("Non-native object '"+pair.second->getName()+"' was added outside the map documents. Use Add Run3 XML child inside a scene/sequence section instead.");
-            std::vector<QByteArray> outputs;
-            for(size_t i=0;i<roots.size();++i) {
-                auto editor=dynamic_cast<Entity*>(OgitorsRoot::getSingletonPtr()->FindObject(roots[i]));
-                if(!editor) throw std::runtime_error("A Run3 document root was deleted; undo that deletion before saving");
-                TiXmlDocument copy(*document.documents[i].xml);
-                auto xml=editor->xml(); copy.ReplaceChild(copy.RootElement(),*xml);
-                outputs.push_back(printXml(copy));
-            }
-            document.save(outputs);
-            fileName=document.content.resolve(document.configRelative);
+            saveNative();
             return SCF_OK;
         } catch(const std::exception& error) {
             if(qEnvironmentVariableIsSet("RUN3_EDITOR_SMOKE")) Ogre::LogManager::getSingleton().logError("Run3 save: "+Ogre::String(error.what()));
@@ -393,6 +454,7 @@ public:
     }
 };
 static Serializer* serializer=nullptr;
+static McpBridge* mcpBridge=nullptr;
 }
 #if defined(_WIN32)
 #define RUN3_EXPORT __declspec(dllexport)
@@ -406,10 +468,16 @@ extern "C" RUN3_EXPORT bool dllStartPlugin(void* identifier,Ogre::String& name) 
     Ogitors::OgitorsRoot::getSingletonPtr()->RegisterEditorFactory(identifier,OGRE_NEW Run3Editor::EntityFactory());
     Run3Editor::serializer=OGRE_NEW Run3Editor::Serializer();
     Ogitors::OgitorsRoot::getSingletonPtr()->RegisterSerializer(identifier,Run3Editor::serializer);
+    Run3Editor::McpContext context;
+    context.document=[]() -> Run3Editor::Document* { return Run3Editor::serializer->fileName.isEmpty()?nullptr:&Run3Editor::serializer->document; };
+    context.lifecycle=[](const QString& tool,const QJsonObject& args) { return Run3Editor::serializer->mcpLifecycle(tool,args); };
+    Run3Editor::mcpBridge=new Run3Editor::McpBridge(std::move(context));
+    Ogitors::OgitorsRoot::getSingletonPtr()->RegisterToolBar(identifier,Run3Editor::mcpBridge->toolbar());
     return true;
 }
 extern "C" RUN3_EXPORT bool dllGetPluginName(Ogre::String& name) { name="Run3 native map editor"; return true; }
 extern "C" RUN3_EXPORT bool dllStopPlugin() {
+    delete Run3Editor::mcpBridge; Run3Editor::mcpBridge=nullptr;
     // ArchiveManager keeps factory pointers until Ogre shutdown, matching OgreOfsPlugin.
     OGRE_DELETE Run3Editor::serializer; Run3Editor::serializer=nullptr; return true;
 }
